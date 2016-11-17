@@ -205,3 +205,61 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       return ParseParenExpr();
   }
 }
+
+static std::map<char, int> BinOpPrecedence;
+
+static int GetTokPrecedence() {
+  if (!isascii(CurTok)) {
+    return -1;
+  }
+
+  int TokPrec = BinOpPrecedence[CurTok];
+  if (TokPrec <= 0) {
+    return -1;
+  }
+
+  return TokPrec;
+}
+
+int main() {
+  BinOpPrecedence['<'] = 10;
+  BinOpPrecedence['+'] = 20;
+  BinOpPrecedence['-'] = 30;
+  BinOpPrecedence['*'] = 40;
+}
+
+static std::unique_ptr<ExprAST> ParseExpression() {
+  auto LHS = ParsePrimary();
+  if (!LHS) {
+    return nullptr;
+  }
+
+  return ParseBinOpRHS(0, std::move(LHS));
+}
+
+static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS) {
+  while (1) {
+    int TokPrec = GetTokPrecedence();
+    if (TokPrec < ExprPrec) {
+      return LHS;
+    }
+
+    int BinOp = CurTok;
+    getNextToken();
+
+    auto RHS = ParsePrimary();
+    if (!RHS) {
+      return nullptr;
+    }
+
+    int NextPrec = GetTokPrecedence();
+    if (TokPrec < NextPrec) {
+      RHS = ParseBinOpRHS(TokPrec+1, std::move(RHS));
+      if (!RHS) {
+        return nullptr;
+      }
+    }
+
+    LHS = llvm::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
+  }
+}
