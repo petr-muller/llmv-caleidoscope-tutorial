@@ -1,3 +1,4 @@
+#include <map>
 #include <string>
 #include <vector>
 #include <memory>
@@ -146,6 +147,8 @@ static std::unique_ptr<ExprAST> ParseNumberExpr() {
   return std::move(Result);
 }
 
+static std::unique_ptr<ExprAST> ParseExpression();
+
 static std::unique_ptr<ExprAST> ParseParenExpr() {
   getNextToken();
   auto V = ParseExpression();
@@ -227,6 +230,8 @@ int main() {
   BinOpPrecedence['-'] = 30;
   BinOpPrecedence['*'] = 40;
 }
+
+static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS);
 
 static std::unique_ptr<ExprAST> ParseExpression() {
   auto LHS = ParsePrimary();
