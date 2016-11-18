@@ -1,8 +1,8 @@
+#include <llvm/ADT/STLExtras.h>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
-#include <llvm/ADT/STLExtras.h>
 
 enum Token {
   tok_eof = -1,
@@ -11,9 +11,9 @@ enum Token {
   tok_def = -2,
   tok_extern = -3,
 
-  //primary
+  // primary
   tok_identifier = -4,
-  tok_number = -5,
+  tok_number = -5
 };
 
 static std::string IdentifierStr;
@@ -93,9 +93,9 @@ class BinaryExprAST : public ExprAST {
   std::unique_ptr<ExprAST> LHS, RHS;
 
   public:
-    BinaryExprAST(char op, std::unique_ptr<ExprAST> LHS,
+    BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                   std::unique_ptr<ExprAST> RHS)
-      : Op(op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+      : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 };
 
 class CallExprAST : public ExprAST {
@@ -112,8 +112,8 @@ class PrototypeAST {
   std::vector<std::string> Args;
 
   public:
-    PrototypeAST(const std::string &name, std::vector<std::string> Args)
-      : Name(name), Args(std::move(Args)) {}
+    PrototypeAST(const std::string &Name, std::vector<std::string> Args)
+      : Name(Name), Args(std::move(Args)) {}
 };
 
 class FunctionAST {
@@ -174,7 +174,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
   getNextToken();
   std::vector<std::unique_ptr<ExprAST>> Args;
   if (CurTok != ')') {
-    while(1) {
+    while (1) {
       if (auto Arg = ParseExpression()) {
         Args.push_back(std::move(Arg));
       } else {
@@ -197,7 +197,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 }
 
 static std::unique_ptr<ExprAST> ParsePrimary() {
-  switch(CurTok) {
+  switch (CurTok) {
     default:
       return LogError("Unknown token when expecting an expression");
     case tok_identifier:
@@ -222,13 +222,6 @@ static int GetTokPrecedence() {
   }
 
   return TokPrec;
-}
-
-int main() {
-  BinOpPrecedence['<'] = 10;
-  BinOpPrecedence['+'] = 20;
-  BinOpPrecedence['-'] = 30;
-  BinOpPrecedence['*'] = 40;
 }
 
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS);
@@ -259,7 +252,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<Expr
 
     int NextPrec = GetTokPrecedence();
     if (TokPrec < NextPrec) {
-      RHS = ParseBinOpRHS(TokPrec+1, std::move(RHS));
+      RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
       if (!RHS) {
         return nullptr;
       }
@@ -319,3 +312,68 @@ static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
   return nullptr;
 }
 
+static void HandleDefinition() {
+  if (ParseDefinition()) {
+    fprintf(stderr, "Parsed a function definition.\n");
+  } else {
+    // Skip token for error recovery.
+    getNextToken();
+  }
+}
+
+static void HandleExtern() {
+  if (ParseExtern()) {
+    fprintf(stderr, "Parsed an extern\n");
+  } else {
+    // Skip token for error recovery.
+    getNextToken();
+  }
+}
+
+static void HandleTopLevelExpression() {
+  // Evaluate a top-level expression into an anonymous function.
+  if (ParseTopLevelExpr()) {
+    fprintf(stderr, "Parsed a top-level expr\n");
+  } else {
+    // Skip token for error recovery.
+    getNextToken();
+  }
+}
+
+static void MainLoop() {
+  while (1) {
+    fprintf(stderr, "ready> ");
+    switch (CurTok) {
+      case tok_eof:
+        return;
+      case ';':
+        getNextToken();
+        break;
+      case tok_def:
+        HandleDefinition();
+        break;
+      case tok_extern:
+        HandleExtern();
+        break;
+      default:
+        HandleTopLevelExpression();
+        break;
+    }
+  }
+}
+
+int main() {
+  BinOpPrecedence['<'] = 10;
+  BinOpPrecedence['+'] = 20;
+  BinOpPrecedence['-'] = 20;
+  BinOpPrecedence['*'] = 40;
+
+  // Prime the first token.
+  fprintf(stderr, "ready> ");
+  getNextToken();
+
+  // Run the main "interpreter loop" now.
+  MainLoop();
+
+  return 0;
+}
