@@ -1,8 +1,20 @@
+#include <llvm/ADT/APFloat.h>
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
+
+static llvm::LLVMContext TheContext;
+static llvm::IRBuilder<> Builder(TheContext);
+static std::unique_ptr<llvm::Module> TheModule;
+static std::map<std::string, llvm::Value*> NamedValues;
+
 
 enum Token {
   tok_eof = -1,
@@ -69,24 +81,50 @@ static int gettok() {
   LastChar = getchar();
   return ThisChar;
 }
+
 class ExprAST {
   public:
     virtual ~ExprAST() {}
+    virtual llvm::Value *codegen() = 0;
 };
+
+std::unique_ptr<ExprAST> LogError(const char *Str) {
+  fprintf(stderr, "LogError: %s\n", Str);
+  return nullptr;
+}
+
+llvm::Value *LogErrorV(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
 
 class NumberExprAST : public ExprAST {
   double Val;
 
   public:
     NumberExprAST(double Val) : Val(Val) {}
+    virtual llvm::Value *codegen();
 };
+
+llvm::Value *NumberExprAST::codegen() {
+  return llvm::ConstantFP::get(TheContext, llvm::APFloat(Val));
+}
 
 class VariableExprAST : public ExprAST {
   std::string Name;
 
   public:
     VariableExprAST(const std::string &Name) : Name(Name) {}
+    virtual llvm::Value *codegen();
 };
+
+llvm::Value *VariableExprAST::codegen() {
+  llvm::Value *V = NamedValues[Name];
+  if(!V) {
+    LogErrorV("Unknown variable name");
+  }
+  return V;
+}
 
 class BinaryExprAST : public ExprAST {
   char Op;
@@ -96,7 +134,31 @@ class BinaryExprAST : public ExprAST {
     BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                   std::unique_ptr<ExprAST> RHS)
       : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+    virtual llvm::Value *codegen();
 };
+
+llvm::Value *BinaryExprAST::codegen() {
+  llvm::Value *L = LHS->codegen();
+  llvm::Value *R = RHS->codegen();
+
+  if(!L || !R) {
+    return nullptr;
+  }
+
+  switch(Op) {
+    case '+':
+      return Builder.CreateFAdd(L, R, "addtmp");
+    case '-':
+      return Builder.CreateFSub(L, R, "subtmp");
+    case '*':
+      return Builder.CreateFMul(L, R, "multmp");
+    case '<':
+      L = Builder.CreateFCmpULT(L, R, "cmptmp");
+      return Builder.CreateUIToFP(L, llvm::Type::getDoubleTy(TheContext), "booltmp");
+    default:
+      return LogErrorV("Invalid binary operator");
+  }
+}
 
 class CallExprAST : public ExprAST {
   std::string Callee;
@@ -105,7 +167,29 @@ class CallExprAST : public ExprAST {
   public:
     CallExprAST(const std::string &Callee, std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(Callee), Args(std::move(Args)) {}
+    virtual llvm::Value *codegen();
 };
+
+llvm::Value *CallExprAST::codegen() {
+  llvm::Function *CalleeF = TheModule->getFunction(Callee);
+  if (!CalleeF) {
+    return LogErrorV("Unknown function referenced");
+  }
+
+  if (CalleeF->arg_size() != Args.size()) {
+    return LogErrorV("Incorrect # arguments passed");
+  }
+
+  std::vector<llvm::Value *> ArgsV;
+  for (unsigned int i = 0, e = Args.size(); i != e; ++i) {
+    ArgsV.push_back(Args[i]->codegen());
+    if (!ArgsV.back()) {
+      return nullptr;
+    }
+  }
+
+  return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
+}
 
 class PrototypeAST {
   std::string Name;
@@ -115,6 +199,11 @@ class PrototypeAST {
     PrototypeAST(const std::string &Name, std::vector<std::string> Args)
       : Name(Name), Args(std::move(Args)) {}
 };
+
+std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
+  LogError(Str);
+  return nullptr;
+}
 
 class FunctionAST {
   std::unique_ptr<PrototypeAST> Proto;
@@ -129,16 +218,6 @@ class FunctionAST {
 static int CurTok;
 static int getNextToken() {
   return CurTok = gettok();
-}
-
-std::unique_ptr<ExprAST> LogError(const char *Str) {
-  fprintf(stderr, "LogError: %s\n", Str);
-  return nullptr;
-}
-
-std::unique_ptr<PrototypeAST> LogErrorP(const char *Str) {
-  LogError(Str);
-  return nullptr;
 }
 
 static std::unique_ptr<ExprAST> ParseNumberExpr() {
